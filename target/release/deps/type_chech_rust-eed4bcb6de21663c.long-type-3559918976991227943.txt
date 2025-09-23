@@ -1,1 +1,0 @@
-(Ptr<&Expr<'_>>, Vec<Ptr<&Universe<'_>>>, Vec<Ptr<&Universe<'_>>>): Borrow<(Ptr<&Expr<'_>>, &[Ptr<&Universe<'_>>], &[Ptr<&Universe<'_>>])>

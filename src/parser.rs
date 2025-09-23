@@ -405,7 +405,6 @@ impl<'a> ExportFile<'a>{
     fn parse_param(&mut self, ws: &mut Iter<&str>) -> UniversePtr<'a> {
         let name = self.parse_name(ws);
         let hash = hash64!(PARAM_HASH, name);
-        // Has to already exist
         let val = Param {name , hash };
         let idx = self.universes.get_index_of(&val).unwrap();
         Ptr::from(idx as usize)

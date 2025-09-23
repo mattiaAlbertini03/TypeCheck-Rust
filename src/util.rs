@@ -90,6 +90,7 @@ impl<'t> ExportFile<'t> {
             exprs: new_fx_index_set(),
             rec_rules: new_fx_index_set(),
             uparams: new_fx_index_set(),
+
             declars: new_fx_index_map(),
             infers: new_fx_index_map(),
             whnfs: new_fx_index_map(),

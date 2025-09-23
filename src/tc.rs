@@ -281,7 +281,7 @@ impl<'t> ExportFile<'t> {
 
         match self.read_expr_pair(x, y){
 
-            ( Var { .. }, _ ) | ( _, Var { .. } ) => panic!("trovato Var durante il def_eq"),
+            ( Var { .. }, Var { .. } ) => panic!("trovato Var durante il def_eq"),
 
             ( FreeVar {idx: idx_x, .. }, FreeVar {idx: idx_y, ..} ) => return idx_x == idx_y,
             
@@ -360,8 +360,12 @@ impl<'t> ExportFile<'t> {
             _ => {}
         }
 
-        if self.proof_irrelevant(x, y) || self.proof_irrelevant(y, x) {
-            return true
+        let infer_x = self.infer(x);
+        let infer_y = self.infer(y);
+        if self.is_sort(infer_x) == self.zero() {
+            if self.is_sort(infer_y) == self.zero() {
+                return self.def_eq(infer_x, infer_y)
+            }
         }
 
         let whnf_x = self.whnf(x);
@@ -394,18 +398,7 @@ impl<'t> ExportFile<'t> {
         }
         false
     }
-    
-    fn proof_irrelevant(&mut self, x: ExprPtr<'t>, y: ExprPtr<'t>) -> bool { 
-        let infer_x = self.infer(x);
-        let infer_y = self.infer(y);
-        if self.is_sort(infer_x) == self.zero() {
-            if self.is_sort(infer_y) == self.zero() {
-                return self.def_eq(infer_x, infer_y)
-            }
-        }
-        false
-    }
-
+   
     pub fn def_eq_struct(&mut self, x: ExprPtr<'t>, y: ExprPtr<'t>) -> bool {
         let mut args = Vec::new();
         let mut s = y;
