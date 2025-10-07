@@ -114,15 +114,12 @@ impl<'t> ExportFile<'t> {
         match self.read_universe(universe) {
             Zero => true,
             Succ {pred, ..} => self.contiene_param(pred, params),
-                
-            // i due elementi di max devno essere entrambi in uparams, altrimeni userei un parametro che non è in "input"
             Max {v1, v2, ..} | IMax{v1, v2, ..} => self.contiene_param(v1, params) && self.contiene_param(v2, params),
-            
             Param{..} => self.read_uparams(params).iter().copied().any(|x| x == universe),
         }
     }
 
-    pub fn leq_many(&mut self, xs: UparamsPtr<'t>, ys: UparamsPtr<'t>) -> bool {
+    pub fn eq_many(&mut self, xs: UparamsPtr<'t>, ys: UparamsPtr<'t>) -> bool {
         let xs = self.read_uparams(xs).clone();
         let ys = self.read_uparams(ys).clone();
         if xs.len() != ys.len() {
@@ -162,7 +159,7 @@ impl<'t> ExportFile<'t> {
                 let succ_v = self.succ(v2);
                 let succ = self.alloc_uparams(vec![succ_v]);
                 let param = self.alloc_uparams(vec![v2]);
-//controllo cosa sucerebbe se 0 o un succ
+                
                 let lz = self.subst_universe(l, param, zero);
                 let rz = self.subst_universe(r, param, zero);
                 let ls = self.subst_universe(l, param, succ);

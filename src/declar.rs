@@ -11,7 +11,7 @@ pub const REC_RULE_HASH: u64 = 40;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RecRule<'a> {
     pub ctor_name: NamePtr<'a>,
-    pub num_param: u32,
+    pub num_fields: u32,
     pub val: ExprPtr<'a>,
     pub hash: u64,
 }
@@ -23,9 +23,9 @@ impl<'a> Hash for RecRule<'a> {
 pub type RecRulePtr<'a> = Ptr<&'a RecRule<'a>>;
 
 impl<'t> ExportFile<'t> {
-    pub fn rec_rule(&mut self, ctor_name: NamePtr<'t>, num_param: u32, val : ExprPtr<'t>) -> RecRulePtr<'t> {
-        let hash = hash64!(REC_RULE_HASH, ctor_name, num_param, val);
-        self.alloc_rec_rule( RecRule { ctor_name, num_param, val , hash})
+    pub fn rec_rule(&mut self, ctor_name: NamePtr<'t>, num_fields: u32, val : ExprPtr<'t>) -> RecRulePtr<'t> {
+        let hash = hash64!(REC_RULE_HASH, ctor_name, num_fields, val);
+        self.alloc_rec_rule( RecRule { ctor_name, num_fields, val , hash})
     }
 }
 
@@ -38,7 +38,8 @@ pub enum Declar<'a> {
     Definition { name: NamePtr<'a>, uparams: UparamsPtr<'a>, ty: ExprPtr<'a>, val: ExprPtr<'a>},
     Inductive{ name: NamePtr<'a>, uparams: UparamsPtr<'a>, ty: ExprPtr<'a>, num_indices: u32, all_ctor_names: Vec<NamePtr<'a>>},
     Constructor{ name: NamePtr<'a>, uparams: UparamsPtr<'a>, ty: ExprPtr<'a>, num_params: u32, num_fields: u32, parent: NamePtr<'a>},
-    Recursor{ name: NamePtr<'a>, uparams: UparamsPtr<'a>, ty: ExprPtr<'a>, },
+    Recursor{ name: NamePtr<'a>, uparams: UparamsPtr<'a>, ty: ExprPtr<'a>, all_inductive_names: Vec<NamePtr<'a>>, num_params: u32, num_indices: u32, 
+                num_motives: u32, num_minors: u32, rec_rules: Vec<RecRulePtr<'a>>},
 }
 
 macro_rules! getter {

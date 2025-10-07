@@ -9,15 +9,15 @@ pub const NUM_HASH:  u64 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Name<'a> {
-    Anon,
+    Anonymous,
     Str {pfx: NamePtr<'a>, value: String, hash: u64},
-    Num {pfx: NamePtr<'a>, value: u64, hash: u64},
+    Num {pfx: NamePtr<'a>, value: u32, hash: u64},
 }
 
 impl<'a> Name<'a> {
     fn get_hash(&self) -> u64 {
         match self {
-            Anon => ANON_HASH,
+            Anonymous => ANON_HASH,
             Str{ hash, .. } | Num{hash, ..} => *hash,
         }
     }
@@ -37,7 +37,7 @@ impl<'a> ExportFile<'a> {
         let hash = hash64!(STR_HASH, pfx, value);
         self.alloc_name(Str{pfx, value, hash})
     }
-    pub fn num(&mut self, pfx: NamePtr<'a>, value: u64) -> NamePtr<'a> {
+    pub fn num(&mut self, pfx: NamePtr<'a>, value: u32) -> NamePtr<'a> {
         let hash = hash64!(NUM_HASH, pfx, value);
         self.alloc_name(Num{pfx, value, hash})
     }

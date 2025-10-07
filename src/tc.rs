@@ -1,3 +1,4 @@
+use crate::declar::*;
 use crate::declar::Declar::*;
 use crate::name::NamePtr;
 use crate::expr::{Expr::*, ExprPtr};
@@ -19,7 +20,7 @@ impl<'t> ExportFile<'t> {
         if !em.is_empty() {
             self.controllo_parametri(ty, uparams);
         }
-        self.is_sort(ty);
+        self.infer_sort_of(ty);
         if val.is_some() {
             let val = val.unwrap();
             if !em.is_empty() {
@@ -27,11 +28,10 @@ impl<'t> ExportFile<'t> {
             }
             let v = self.infer(val);
 
-            if !self.def_eq(ty, v){
-                println!("Errore nella dichiarazione {:?}: tipo della definizione non coincide. ty={:?}, val_type={:?}", name.idx, self.read_expr(ty), self.read_expr(v));
-            }
+            assert!(self.def_eq(ty, v), "Errore nella dichiarazione {:?}: tipo della definizione non coincide. ty={:?}, val_type={:?}", 
+                         name.idx, self.read_expr(ty), self.read_expr(v));
         }
-
+        println!("Dichiarazione {:?} scritta corretamente", name.idx);
     }
 
     pub fn controllo_parametri(&mut self, ty: ExprPtr<'t>, ups : UparamsPtr<'t>) {
@@ -68,11 +68,24 @@ impl<'t> ExportFile<'t> {
         }
     }
 
+    pub fn unfold_app(&mut self, x: ExprPtr<'t>) -> (ExprPtr<'t>, Vec<ExprPtr<'t>>) {
+        let mut e = x;
+        let mut args = Vec::new();
+        while let App { fun, arg, .. } = self.read_expr(e) {
+            args.push(arg);
+            e = fun;
+        }
+        args.reverse();
+        (e, args)
+    }
+
     pub fn infer(&mut self, e: ExprPtr<'t>) -> ExprPtr<'t> {
         if self.infers.contains_key(&e) {
             return self.read_infer(e)
         }
+        
         let out = match self.read_expr(e) {
+            
             Var { .. } => panic!("infer sulla var, {:?}", self.read_expr(e)),
 
             FreeVar { ty, .. } => ty,
@@ -82,15 +95,18 @@ impl<'t> ExportFile<'t> {
                 let vuoto = self.alloc_uparams(vec![]);
                 self.mk_const(name, vuoto )
             }
+            
             StrLit { .. } => {
                 let name = self.mk_str(self.anonymous(), "String".to_string());
                 let vuoto = self.alloc_uparams(vec![]);
                 self.mk_const(name, vuoto )
             }
+            
             Sort { universe, .. } => {
                 let s = self.succ(universe);
                 self.sort(s)
             }
+            
             Const {name, universes, ..} => {
                 let dec =  self.read_declar(name);
                 if dec.uparams() == universes {
@@ -98,8 +114,9 @@ impl<'t> ExportFile<'t> {
                 }
                 self.subst_expr_universes(dec.ty(), dec.uparams(), universes)
             }
+            
             Let { ty, val, body, .. } =>  {
-                self.is_sort(ty);
+                self.infer_sort_of(ty);
                 let v = self.infer(val);
                 assert!(self.def_eq(ty, v), "Errore nella let: ty={:?}, val={:?}", self.read_expr(ty), self.read_expr(v));
                 let inst = self.inst(body, val, 0);
@@ -107,74 +124,72 @@ impl<'t> ExportFile<'t> {
             }
 
             Pi {ty, body, ..} => {
-                let l = self.is_sort(ty);
+                let l = self.infer_sort_of(ty);
                 let free = self.free_var(ty);
                 let b = self.inst(body, free, 0);
-                let r = self.is_sort(b);
+                let r = self.infer_sort_of(b);
                 let imax = self.imax(l, r);
                 self.sort(imax)
             }
+            
             Lambda {name, ty, body, ..} => {
-                self.is_sort(ty);
+                self.infer_sort_of(ty);
                 let free = self.free_var(ty);
                 let inst = self.inst(body, free, 0);  
                 let inf = self.infer(inst);
                 let abstr = self.abstr(inf, free, 0);
                 self.pi(name, ty, abstr)
             } 
+            
             App {fun, arg, ..} => {
                 let infer = self.infer(fun);
                 let whnf_fun = self.whnf(infer);
                 match self.read_expr(whnf_fun) {
                     Pi {ty, body, ..} => {
                         let a = self.infer(arg);
-                        assert!(self.def_eq(ty, a),  "Errore nel App(Pi)) \n ty={:?},\n a={:?}", self.read_expr(ty), self.read_expr(a));
+                        assert!(self.def_eq(ty, a), "Errore nel App(Pi)) \n ty={:?},\n a={:?}", self.read_expr(ty), self.read_expr(a));
                         self.inst(body, arg, 0)
                     }
-                    _ => panic!("Non è stato trovato un Pi dentro App"),
+                    _ => panic!("Non è stato trovato un Pi dentro App\n {:?}", self.read_expr(e)),
                 }
             }
             
             Proj {name, idx, structure, ..} => {
                 let s = self.infer(structure);
-                let mut s = self.whnf(s);
-                let mut args = Vec::new();
-                while let App { fun, arg, .. } = self.read_expr(s) {
-                    args.push(arg);
-                    s = fun;
-                }
-                args.reverse();
+                let s = self.whnf(s);
+                let (s, args) = self.unfold_app(s);
                 if let Const {name : name_c, universes, .. } = self.read_expr(s) {
                     assert_eq!(name, name_c);
                     if let Inductive {all_ctor_names, num_indices, .. } = self.read_declar(name) {
-                        assert_eq!(all_ctor_names.len(), 1, "proj usato su un elemento che non è una struttura");
-                        assert_eq!(num_indices, 0, "proj usato su un elemento che non è una struttura");
-                        if let ctor @ Constructor{num_params, .. } = self.read_declar(all_ctor_names[0]){
-                            let mut ctor_ty = self.subst_expr_universes(ctor.ty(), ctor.uparams(), universes);
-                            for arg in args.iter().take(num_params as usize) {
-                                ctor_ty = self.whnf(ctor_ty);
-                                match self.read_expr(ctor_ty) {
-                                    Pi { body, .. } => ctor_ty = self.inst(body, *arg, 0),
-                                    _ => panic!("Proj: Non è stato trovato un pi per il param"),
-                                }
-                            }
-                            for i in 0..idx {
-                                ctor_ty = self.whnf(ctor_ty);
-                                match self.read_expr(ctor_ty) {
-                                    Pi { body, .. } => {
-                                        let p = self.proj(name, i, structure);
-                                        ctor_ty = self.inst(body, p, 0);
+                        if all_ctor_names.len() == 1 && num_indices == 0 {
+                            if let Constructor{ty, uparams, num_params, .. } = self.read_declar(all_ctor_names[0]){
+                                let mut ctor_ty = self.subst_expr_universes(ty, uparams, universes);
+                                for arg in args.iter().take(num_params as usize) {
+                                    ctor_ty = self.whnf(ctor_ty);
+                                    match self.read_expr(ctor_ty) {
+                                        Pi { body, .. } => ctor_ty = self.inst(body, *arg, 0),
+                                        _ => panic!("Proj: Non è stato trovato un pi per il param"),
                                     }
-                                    _ => panic!("Proj: Non è stato trovato un pi per l'idx"),
+                                }
+                                for i in 0..idx {
+                                    ctor_ty = self.whnf(ctor_ty);
+                                    match self.read_expr(ctor_ty) {
+                                        Pi { body, .. } => {
+                                            let p = self.proj(name, i, structure);
+                                            ctor_ty = self.inst(body, p, 0);
+                                        }
+                                        _ => panic!("Proj: Non è stato trovato un pi per l'idx"),
+                                    }
+                                }
+                                ctor_ty = self.whnf(ctor_ty);
+                                match self.read_expr(ctor_ty) {
+                                    Pi { ty, .. } => return ty,
+                                    _ => panic!("proj: Non trovato un Pi da ritornare"),
                                 }
                             }
-                            ctor_ty = self.whnf(ctor_ty);
-                            match self.read_expr(ctor_ty) {
-                                Pi { ty, .. } => return ty,
-                                _ => panic!("proj: Non trovato un Pi da ritornare"),
-                            }
+                            panic!("proj: constructor non trovato");
                         }
-                        panic!("proj: constructor non trovato");
+                        panic!("Non è una structure");
                     }
                     panic!("proj inductive non trovato");
                 }
@@ -189,13 +204,88 @@ impl<'t> ExportFile<'t> {
         if self.whnfs.contains_key(&v) {
             return self.read_whnf(v)
         }
+        let mut args = Vec::new();
         let mut e = v;
-        let out = loop {
+        let mut out = loop {
             match self.read_expr(e) {
-                Let { val, body, .. } => {
-                    e = self.inst(body, val, 0);
-                }
                 
+                Let { val, body, .. } => e = self.inst(body, val, 0),
+                 
+                Const {name, ..} if matches!(self.read_declar(name), Recursor{..})=>{
+                    if let Recursor{ all_inductive_names, num_params, num_indices, num_motives, num_minors, rec_rules, .. } = self.read_declar(name){
+                        let tot_wtout_indices =  num_params + num_motives + num_minors;
+                        let tot_wt_indices = tot_wtout_indices + num_indices;
+                        
+                        args.reverse();
+                        let value = args[tot_wt_indices as usize]; 
+                        
+                        let whnf_v = self.whnf(value);
+                        let (whnf_v, args_app) = self.unfold_app(whnf_v); 
+                        
+                        let mut no_find = true;
+                        if let Const{name, ..} = self.read_expr(whnf_v){
+                            if let Constructor{name, ..} = self.read_declar(name) {
+                                no_find = false;
+                                let mut no_rule = true;
+                                for rule in rec_rules{
+                                    let RecRule{ctor_name, num_fields, val, ..} = self.read_rec_rule(rule);
+                                    if name == ctor_name {
+                                        no_rule = false;
+                                        let mut app = val;
+                                        for arg in args.iter().take(tot_wtout_indices as usize) {
+                                            app= self.app(app, *arg);
+                                        }
+                                        args.drain(0..tot_wtout_indices as usize);
+                                        args.reverse();
+                                        
+                                        for arg in args_app.iter().take(num_fields as usize) {
+                                            app= self.app(app, *arg);
+                                        }
+                                        
+                                        e = self.whnf(app);
+                                    }
+                                }
+                                if no_rule {
+                                    panic!("Non esiste una regola di riduzione per il Constructor di questa Recursor");
+                                }
+                            } 
+                        }
+                        
+                        if no_find {
+                            no_find = true;
+                            if all_inductive_names.len() == 1 {
+                                if let Inductive {all_ctor_names, num_indices, .. } = self.read_declar(name) {
+                                    if all_ctor_names.len() == 1 && num_indices == 0 {
+                                        if let Constructor{num_params, num_fields, .. } = self.read_declar(all_ctor_names[0]){
+                                            no_find = false;
+                                            let mut app = whnf_v;
+                                            for arg in args.iter().take(tot_wtout_indices as usize) {
+                                                app= self.app(app, *arg);
+                                            }
+                                            args.drain(0..tot_wtout_indices as usize);
+                                            args.reverse();
+
+                                            if num_params != 0{
+                                                for i in 0..num_fields {
+                                                    let proj = self.proj(name, i, whnf_v);
+                                                    app = self.app(app, proj);
+                                                }
+                                            }
+                                            e = self.whnf(app);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if no_find {
+                            args.reverse();
+                            break e;
+                        }
+                    } else{
+                        panic!("Elemento Recursor non Recursor");
+                    }
+                }
+
                 Const {name, universes, ..} => {
                     let d = self.read_declar(name);
                     if let Some(v) = d.val() {
@@ -206,100 +296,75 @@ impl<'t> ExportFile<'t> {
                 }
                 
                 Proj { idx, structure, .. } => {
-                    let mut x = self.whnf(structure);
-                    let mut args = Vec::new();
-                    while let App { fun, arg, .. } = self.read_expr(x) {
-                        args.push(arg);
-                        x = fun;
-                    }        
-                    args.reverse();
+                    let x = self.whnf(structure);
+                    let (x, args_proj) = self.unfold_app(x);
+
                     if let Const { name, .. } = self.read_expr(x) {
                         if let Constructor { num_params, .. } = self.read_declar(name) {
-                            assert!(args.len() > (idx + num_params) as usize);
-                            e = args[(idx + num_params) as usize];
-                        } 
+                            e = args_proj[(idx + num_params) as usize];
+                        } else {
+                            break e;
+                        }
                     } else {
                         break e;
                     }
                 }
 
-                App { .. } => {
-                    let mut args = Vec::new();
-                    while let App { fun, arg, .. } = self.read_expr(e) {
-                        args.push(arg);
-                        e = fun;
+                App { fun, arg, .. } => {
+                    args.push(arg);
+                    e = fun;
+                }
+
+                Lambda { body, .. } => {
+                    if let Some(pop) = args.pop() {
+                        e = self.inst(body, pop, 0); 
+                    } else {
+                        break e; 
                     }
-                    let mut args_apply = Vec::new();
-                    while let (Lambda {body, .. }, Some(pop)) = (self.read_expr(e), args.pop()) {
-                        e = body;
-                        args_apply.push(pop);
-                    }
-                    for a in args_apply {
-                        e = self.inst(e, a, 0);
-                    }
-                    args.reverse();
-                    for a in args {
-                        e = self.app(e, a);
-                    }
-                    break e;
                 }
                 
                 _ => break e,
-            }
+           }
         };
+        
+        args.reverse();
+        for a in args {
+            out = self.app(out, a);
+        }
+        
         self.whnfs.insert(v, out);
         out
     }
 
-   pub fn is_sort(&mut self, mut e: ExprPtr<'t>) -> UniversePtr<'t> {
-       loop {
-            let expr = self.infer(e);
-            let expr = self.whnf(expr);
-            match self.read_expr(expr) {
-                Sort {universe, ..} => return universe,
-                
-                FreeVar {ty, ..} => e = ty,
-                
-                Const { name, universes, .. } => {
-                    let d = self.read_declar(name);
-                    e = self.subst_expr_universes(d.ty(), d.uparams(), universes);
-                }
-                
-                NatLit {..} | StrLit {..} => panic!("valore non Sort, {:?}", self.read_expr(expr)),
-            
-                _ => e = expr,
-            }
-       }
+    pub fn infer_sort_of(&mut self, e: ExprPtr<'t>) -> UniversePtr<'t> {
+        let expr = self.infer(e);
+        let expr = self.whnf(expr);
+        match self.read_expr(expr) {
+            Sort {universe, ..} => return universe,
+            _=> panic!("valore non Sort, {:?}", self.read_expr(expr)),
+        }
     }
 
     pub fn def_eq(&mut self, x: ExprPtr<'t>, y: ExprPtr<'t>) -> bool {
-        println!("def_EQ \n ty={:?},\n a={:?}", self.read_expr(x), self.read_expr(y));
-
+        
         if x == y {
             return true;
         }
+        
+        let x = self.whnf(x);
+        let y = self.whnf(y); 
 
-        match self.read_expr_pair(x, y){
-
+        let out = match self.read_expr_pair(x, y){
+            
             ( Var { .. }, Var { .. } ) => panic!("trovato Var durante il def_eq"),
 
-            ( FreeVar {idx: idx_x, .. }, FreeVar {idx: idx_y, ..} ) => return idx_x == idx_y,
+            ( FreeVar {idx: idx_x, .. }, FreeVar {idx: idx_y, ..} ) => idx_x == idx_y,
             
-            ( Sort {universe : u_x, .. }, Sort {universe : u_y, ..} ) => return self.leq(u_x, u_y, 0) && self.leq(u_y, u_x, 0),
+            ( Sort {universe : u_x, .. }, Sort {universe : u_y, ..} ) => self.leq(u_x, u_y, 0) && self.leq(u_y, u_x, 0),
             
-            ( Const {name: n1, universes: u1, ..}, Const {name: n2, universes: u2, ..}) if n1 == n2 => return self.leq_many(u1, u2),
-            
-            ( Const {..}, Const {..}) => {
-                if self.unit_like(x,y) || self.unit_like(y, x) {
-                    return true
-                }
-            }
-            
-            ( App {fun: f1, arg: a1, ..}, App {fun: f2, arg: a2, ..}) => {
-                if self.def_eq(f1, f2) {
-                    return self.def_eq(a1, a2 )
-                }
-            }
+            ( Const {name: n1, universes: u1, ..}, Const {name: n2, universes: u2, ..}) => n1 == n2 && self.eq_many(u1, u2),
+                                                                                                                
+            ( App {fun: f1, arg: a1, ..}, App {fun: f2, arg: a2, ..}) => self.def_eq(f1, f2) && self.def_eq(a1, a2 ), 
 
             ( Lambda {ty: ty1, body: b1, ..}, Lambda {ty: ty2, body: b2, ..}) | ( Pi {ty: ty1, body: b1, ..}, Pi {ty: ty2, body: b2, ..}) => {
                 if self.def_eq(ty1, ty2) {
@@ -308,73 +373,65 @@ impl<'t> ExportFile<'t> {
                     let b = self.inst(b2, free, 0);
                     return self.def_eq(a, b)
                 }
-            }
-            
-            ( Let {val: v1, body: b1, ..}, Let {val: v2, body: b2, ..} ) => {
-                if self.def_eq(v1, v2) {
-                    let x1 = self.inst(b1, v1, 0);
-                    let y1 = self.inst(b2, v2, 0);
-                    return self.def_eq(x1, y1)
-                }
-            }
-            
-            ( Proj { name: n1, idx: i1, structure: s1, .. }, Proj { name: n2, idx: i2, structure: s2, .. }) => {
-                return n1 == n2 && i1 == i2 && self.def_eq(s1, s2);
+                false
             }
         
 
-            ( Lambda {..}, _ ) => {
-                let i_y = self.infer(y);
-                let whnf_y = self.whnf(i_y);
-                if let Pi {name, ty, .. } = self.read_expr(whnf_y) {
-                    let var = self.var(0);
-                    let lambda = self.lambda(name, ty, var);
-                    let app = self.app(lambda, y);
-                    return self.def_eq(x, app)
+            ( Lambda {ty: ty_l, ..}, _ ) => {
+                let infer_y = self.infer(y);
+                if let Pi{ty: ty_p, ..} = self.read_expr(infer_y){
+                    if self.def_eq(ty_l, ty_p) {
+                        let free = self.free_var(ty_l);
+                        let lambda = self.inst(x, free, 0);
+                        let app = self.app(y, free);
+                        return self.def_eq(lambda, app);
+                    }
                 }
+                false
             }
             
-            ( _, Lambda {..} ) => {
-                let i_x = self.infer(x);
-                let whnf_x = self.whnf(i_x);
-                if let Pi {name, ty, .. } = self.read_expr(whnf_x) {
-                    let var = self.var(0);
-                    let lambda = self.lambda(name, ty, var);
-                    let app = self.app(lambda, x);
-                    return self.def_eq(app, y)
+            ( _, Lambda {ty: ty_l, ..} ) => {
+                let infer_x = self.infer(x);
+                if let Pi{ty: ty_p, ..} = self.read_expr(infer_x){
+                    if self.def_eq(ty_l, ty_p) {
+                        let free = self.free_var(ty_l);
+                        let lambda = self.inst(y, free, 0);
+                        let app = self.app(x, free);
+                        return self.def_eq(lambda, app);
+                    }
                 }
+                false
             }
             
-            (App {..}, _) => {
-                if self.def_eq_struct(y,x) {
-                    return true
-                }
-            }
-            
-            (_, App {..} ) => {
-                if self.def_eq_struct(x,y) {
-                    return true
-                }
-            }
-        
-            _ => {}
+            _ => false,
+        };
+
+        if out {
+            return true
+        }
+       
+        if self.def_eq_struct(x,y) {
+            return true
         }
 
+        if self.def_eq_struct(y, x) {
+            return true
+        }
+
+        if self.unit_like(x,y) {
+            return true
+        }
+        if self.unit_like(y, x) {
+            return true
+        }
+        
         let infer_x = self.infer(x);
         let infer_y = self.infer(y);
-        if self.is_sort(infer_x) == self.zero() {
-            if self.is_sort(infer_y) == self.zero() {
+        if self.infer_sort_of(infer_x) == self.zero() {
+            if self.infer_sort_of(infer_y) == self.zero() {
                 return self.def_eq(infer_x, infer_y)
             }
         }
-
-        let whnf_x = self.whnf(x);
-        let whnf_y = self.whnf(y);
-
-        if whnf_x != x || whnf_y != y {
-            return self.def_eq(whnf_x, whnf_y);
-        }
-        
         false
     }
 
@@ -387,7 +444,7 @@ impl<'t> ExportFile<'t> {
                     if self.def_eq(infer_x, infer_y) {
                         if let Constructor{uparams, ..} = self.read_declar(all_ctor_names[0]) {
                             let u1 = self.read_uparams(universes);
-                            let u2 = self.read_uparams(uparams);
+                            let u2 = self.read_uparams(uparams);   
                             if u1.len() == u2.len() {
                                 return true
                             }
@@ -400,13 +457,7 @@ impl<'t> ExportFile<'t> {
     }
    
     pub fn def_eq_struct(&mut self, x: ExprPtr<'t>, y: ExprPtr<'t>) -> bool {
-        let mut args = Vec::new();
-        let mut s = y;
-        while let App { fun, arg, .. } = self.read_expr(s) {
-            args.push(arg);
-            s = fun;
-        }
-        args.reverse();
+        let (s, args) = self.unfold_app(y);
         if let Const {name, .. } = self.read_expr(s) {
             if let Constructor{num_params, num_fields, parent, .. } = self.read_declar(name){
                 if let Inductive {all_ctor_names, num_indices,.. } = self.read_declar(parent) {

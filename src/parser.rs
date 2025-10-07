@@ -46,7 +46,6 @@ pub fn read_file<'p, R: BufRead>( mut buf_reader: R, ) -> Result<ExportFile<'p>,
                     "#IND" => f.parse_inductive(&mut iter),
                     "#CTOR" => f.parse_constructor(&mut iter),
                     "#REC" => f.parse_recursor(&mut iter),
-                    // otherwise, (Name, Universe, Expr)
                     idx => f.parse_altro(idx.parse::<u32>()?, &mut iter)?,
                 }
                 assert!(iter.next().is_none());
@@ -116,7 +115,6 @@ impl<'a> ExportFile<'a>{
         let uparams = self.parse_uparams(ws);
         let inductive = Inductive{ name, ty, uparams, num_indices, all_ctor_names};
         self.declars.insert(name, inductive);
-
     }
 
     fn parse_constructor(&mut self, ws: &mut Iter<&str>) {
@@ -137,20 +135,20 @@ impl<'a> ExportFile<'a>{
         let name = self.parse_name(ws);
         let ty = self.parse_expr(ws);
         let num_inductives = self.parse_u32(ws);
-        let all_inductives = self.parse_names(ws, num_inductives);
+        let all_inductive_names = self.parse_names(ws, num_inductives);
         for i in 0..num_inductives as usize { 
-            assert!(self.declars.get(&all_inductives[i]).filter(|x| matches!(x, Inductive{..})).is_some(), 
+            assert!(self.declars.get(&all_inductive_names[i]).filter(|x| matches!(x, Inductive{..})).is_some(), 
                 "Inductive non esistente, riga:{}",*COUNTER.lock().unwrap());
         }
-        self.parse_u32(ws);
-        self.parse_u32(ws);
-        self.parse_u32(ws);
-        self.parse_u32(ws);
+        let num_params = self.parse_u32(ws);
+        let num_indices = self.parse_u32(ws);
+        let num_motives = self.parse_u32(ws);
+        let num_minors = self.parse_u32(ws);
         let num_rec_rules = self.parse_u32(ws);
-        self.parse_rrs(ws, num_rec_rules);
+        let rec_rules = self.parse_rrs(ws, num_rec_rules);
         self.parse_bool(ws);
         let uparams = self.parse_uparams(ws);
-        let recursor = Recursor{ name, ty, uparams, };
+        let recursor = Recursor{ name, ty, uparams, all_inductive_names, num_params, num_indices, num_motives, num_minors, rec_rules, };
         self.declars.insert(name, recursor);
     }
 
@@ -183,10 +181,10 @@ impl<'a> ExportFile<'a>{
         let ctor_name = self.parse_name(linea);
         assert!(self.declars.get(&ctor_name).filter(|i| matches!(i, Constructor{..})).is_some(), 
                 "Constructor non esistente, riga:{}",*COUNTER.lock().unwrap());
-        let num_param = self.parse_u32(linea);
+        let num_fields = self.parse_u32(linea);
         let val = self.parse_expr(linea);
         assert_eq!(idx as usize, self.rec_rules.len());
-        self.rec_rule(ctor_name, num_param, val);
+        self.rec_rule(ctor_name, num_fields, val);
     }
     
     fn parse_rrs(&mut self, ws: &mut Iter<&str>, limit: u32) -> Vec<RecRulePtr<'a>> {
@@ -207,7 +205,7 @@ impl<'a> ExportFile<'a>{
 
     fn parse_ni(&mut self, idx: u32, ws: &mut Iter<&str>) {
         let pfx = self.parse_name(ws);
-        let sfx = self.parse_u64(ws);
+        let sfx = self.parse_u32(ws);
         assert_eq!(idx as usize, self.names.len());
         self.num(pfx, sfx);
     }
@@ -361,10 +359,6 @@ impl<'a> ExportFile<'a>{
     
     fn parse_u128(&mut self, ws: &mut Iter<&str>) -> u128 {
         ws.next().expect(&format!("Valore non trovato, linea {}",*COUNTER.lock().unwrap())).parse::<u128>().expect(&format!("Valore diverso da un u64, linea {}", *COUNTER.lock().unwrap()))
-    }
-    
-    fn parse_u64(&mut self, ws: &mut Iter<&str>) -> u64 {
-        ws.next().expect(&format!("Valore non trovato, linea {}",*COUNTER.lock().unwrap())).parse::<u64>().expect(&format!("Valore diverso da un u64, linea {}", *COUNTER.lock().unwrap()))
     }
     
     fn parse_bool(&mut self, ws: &mut Iter<&str>) -> bool {

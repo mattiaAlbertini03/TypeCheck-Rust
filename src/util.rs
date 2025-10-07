@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use crate::declar::{RecRule, Declar, RecRulePtr};
 use crate::expr::{ExprPtr, Expr};
 use crate::universe::{UniversePtr, UparamsPtr, Universe, Universe::Zero};
-use crate::name::{NamePtr, Name, Name::Anon};
+use crate::name::{NamePtr, Name, Name::Anonymous};
 
 pub type FxIndexSet<A> = IndexSet<A, BuildHasherDefault<FxHasher>>;
 pub type FxIndexMap<K, V> = IndexMap<K, V, BuildHasherDefault<FxHasher>>;
@@ -30,7 +30,7 @@ impl<A> Hash for Ptr<A> {
     fn hash<H: Hasher>(&self, state: &mut H) { state.write_u64(self.get_hash()) }
 }
 
-pub fn new_fx_index_set<K>() -> FxIndexSet<K> { FxIndexSet::with_hasher(Default::default()) }
+pub fn new_fx_index_set<A>() -> FxIndexSet<A> { FxIndexSet::with_hasher(Default::default()) }
 pub fn new_fx_index_map<K, V>() -> FxIndexMap<K, V> { FxIndexMap::with_hasher(Default::default()) }
 
 #[macro_export]
@@ -95,11 +95,12 @@ impl<'t> ExportFile<'t> {
             infers: new_fx_index_map(),
             whnfs: new_fx_index_map(),
         };
-        out.names.insert(Anon);
+        out.names.insert(Anonymous);
         out.universes.insert(Zero);
         out
     }
 
+    reader!(read_rec_rule, rec_rules, RecRulePtr<'t>, RecRule<'t>);
     reader!(read_name, names, NamePtr<'t>, Name<'t>);
     reader!(read_expr, exprs, ExprPtr<'t>, Expr<'t>);
     reader!(read_universe, universes, UniversePtr<'t>, Universe<'t>);

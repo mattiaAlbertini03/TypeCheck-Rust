@@ -114,37 +114,46 @@ impl<'t> ExportFile<'t> {
     
     pub fn subst_expr_universes(&mut self, e: ExprPtr<'t>, ups_dec: UparamsPtr<'t>, ups_const: UparamsPtr<'t>) -> ExprPtr<'t> {
         match self.read_expr(e) {
+            
             Var { .. } | NatLit { .. } | StrLit { .. } => e,
+            
             FreeVar { .. } => panic!("subst di universi su una freeVar"),
+            
             Sort { universe, .. } => {
                 let universe = self.subst_universe(universe, ups_dec, ups_const);
                 self.sort(universe)
             }
+            
             Const { name, universes, .. } => {
                 let universes = self.subst_universes(universes, ups_dec, ups_const);
                 self.mk_const(name, universes)
             }
+            
             App { fun, arg, .. } => {
                 let fun = self.subst_expr_universes(fun, ups_dec, ups_const);
                 let arg = self.subst_expr_universes(arg, ups_dec, ups_const);
                 self.app(fun, arg)
             }
+            
             Pi { name,  ty, body, .. } => {
                 let ty = self.subst_expr_universes(ty, ups_dec, ups_const);
                 let body = self.subst_expr_universes(body, ups_dec, ups_const);
                 self.pi(name,  ty, body)
             }
+            
             Lambda { name,  ty, body, .. } => {
                 let ty = self.subst_expr_universes(ty, ups_dec, ups_const);
                 let body = self.subst_expr_universes(body, ups_dec, ups_const);
                 self.lambda(name,  ty, body)
             }
+            
             Let { name, ty, val, body, .. } => {
                 let ty = self.subst_expr_universes(ty, ups_dec, ups_const);
                 let val = self.subst_expr_universes(val, ups_dec, ups_const);
                 let body = self.subst_expr_universes(body, ups_dec, ups_const);
                 self.mk_let(name, ty, val, body)
             }
+            
             Proj { name, idx, structure, .. } => {
                 let structure = self.subst_expr_universes(structure, ups_dec, ups_const);
                 self.proj(name, idx, structure)
